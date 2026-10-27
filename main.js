@@ -4,7 +4,7 @@ const { spawn } = require("child_process");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { Plugin, Notice, Menu, ItemView, FileView, TFile, TFolder, FuzzySuggestModal, Modal, TextComponent, DropdownComponent, FileSystemAdapter, PluginSettingTab, Setting, setIcon, normalizePath } = require("obsidian");
+const { Plugin, Notice, Menu, ItemView, TFile, TFolder, FuzzySuggestModal, Modal, TextComponent, DropdownComponent, FileSystemAdapter, PluginSettingTab, Setting, setIcon, normalizePath } = require("obsidian");
 
 // PDF++ 用来把笔记和 PDF 绑起来的属性，取它自己的设置，没有就用默认值
 const DEFAULT_PROP = "PDF";
@@ -30,7 +30,7 @@ const EXCALIDRAW_SKELETON = [
   "%%",
   "",
 ].join("\n");
-const CODE_EXT = new Set(["py", "ipynb", "js", "mjs", "ts", "sh", "c", "cpp", "h", "hpp", "java", "rs", "go", "r", "m", "sql"]);
+const CODE_EXT = new Set(["py", "ipynb", "js", "mjs", "ts", "sh", "c", "cc", "cpp", "cxx", "h", "hpp", "java", "rs", "go", "r", "m", "sql"]);
 const IS_WIN = process.platform === "win32";
 const DEFAULT_EDITOR = IS_WIN ? 'code "{path}"' : 'open -a "Visual Studio Code" "{path}"';
 
@@ -150,7 +150,6 @@ class LectureSuggest extends FuzzySuggestModal {
 }
 
 const VIEW_TYPE = "material-group-view";
-const CODE_VIEW = "material-code-view";
 const PROGRESS_VIEW = "material-progress-view";
 
 // 右侧面板：跟着当前文件，把同一组里的课件、实验、笔记、作业列出来
@@ -224,12 +223,16 @@ class GroupView extends ItemView {
     const ext = file.extension.toLowerCase();
     if (["mp4", "mkv", "mov", "avi", "webm", "m4v"].includes(ext)) return "lucide-video";
     if (["mp3", "m4a", "wav", "flac", "ogg"].includes(ext)) return "lucide-audio-lines";
+    if (["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"].includes(ext)) return "lucide-image";
+    if (["epub", "mobi", "azw3"].includes(ext)) return "lucide-book-open";
+    if (["html", "htm"].includes(ext)) return "lucide-globe";
     if (file.name.toLowerCase().endsWith(".excalidraw.md")) return "lucide-pencil-ruler";
     if (ext === "md") return "lucide-file-text";
     if (ext === "canvas") return "lucide-layout-dashboard";
     if (ext === "pdf") return "lucide-file-type-2";
     if (ext === "docx" || ext === "doc") return "lucide-file-text";
     if (ext === "pptx" || ext === "ppt") return "lucide-presentation";
+    if (CODE_EXT.has(ext)) return "lucide-file-code";
     return "lucide-paperclip";
   }
 }
@@ -476,68 +479,6 @@ class ProgressView extends ItemView {
   }
 }
 
-// 代码文件在 Obsidian 里的最小编辑器：纯文本编辑 + 运行/外部编辑入口
-class CodeFileView extends FileView {
-  constructor(leaf, plugin) {
-    super(leaf);
-    this.plugin = plugin;
-    this.area = null;
-    this.timer = null;
-  }
-
-  getViewType() {
-    return CODE_VIEW;
-  }
-
-  getDisplayText() {
-    return this.file ? this.file.name : "代码";
-  }
-
-  getIcon() {
-    return "lucide-file-code";
-  }
-
-  async onLoadFile(file) {
-    const content = await this.app.vault.read(file);
-    this.render(file, content);
-  }
-
-  async onUnloadFile(file) {
-    if (this.area) await this.save(file, this.area.value);
-  }
-
-  render(file, content) {
-    const container = this.contentEl;
-    container.empty();
-    container.addClass("mn-code");
-
-    const bar = container.createDiv({ cls: "mn-code-bar" });
-    if (this.plugin.hasRun(file)) {
-      const run = bar.createEl("button", { text: "运行" });
-      run.onclick = () => this.plugin.runCode(file);
-    }
-    const external = bar.createEl("button", { text: "VS Code" });
-    external.onclick = () => this.plugin.openInEditor(file);
-
-    const area = container.createEl("textarea", { cls: "mn-code-area" });
-    area.value = content;
-    area.spellcheck = false;
-    area.addEventListener("input", () => {
-      window.clearTimeout(this.timer);
-      this.timer = window.setTimeout(() => this.save(file, area.value), 600);
-    });
-    this.area = area;
-  }
-
-  async save(file, value) {
-    try {
-      const current = await this.app.vault.read(file);
-      if (current !== value) await this.app.vault.modify(file, value);
-    } catch (error) {
-      console.error("[course-navigator]", error);
-    }
-  }
-}
 class MaterialSuggest extends FuzzySuggestModal {
   constructor(app, files, onChoose) {
     super(app);
@@ -611,11 +552,15 @@ class PdfNotePlugin extends Plugin {
           return;
         }
         if (!(file instanceof TFile)) return;
-        else if (this.isCode(file)) this.addCodeMenu(menu, file);
-        else if (IS_WIN && VS_OPENABLE_EXT.has(String(file.extension || "").toLowerCase()))
+        if (this.isMediaEntry(file)) {
+          this.addMediaMenu(menu, file);
+          return;
+        }
+        // 代码文件可能同时是材料：运行/编辑器入口与材料菜单都挂
+        if (this.isCode(file)) this.addCodeMenu(menu, file);
+        if (IS_WIN && VS_OPENABLE_EXT.has(String(file.extension || "").toLowerCase()))
           this.addVisualStudioMenu(menu, file);
-        else if (this.isMediaEntry(file)) this.addMediaMenu(menu, file);
-        else if (this.isMaterial(file)) this.addMenuItem(menu, file);
+        if (this.isMaterial(file)) this.addMenuItem(menu, file);
         else if (file.extension.toLowerCase() === "md") this.addNoteMenu(menu, file);
       })
     );
@@ -712,9 +657,7 @@ class PdfNotePlugin extends Plugin {
       id: "plugin-status",
       name: "查看插件状态",
       callback: () => {
-        const version = this.manifest.version;
-        const codeView = Boolean(this.app.viewRegistry?.getTypeByExtension?.("py"));
-        new Notice(`Course Navigator ${version}｜代码视图 ${codeView ? "已注册" : "未注册"}`, 8000);
+        new Notice(`Course Navigator ${this.manifest.version}`, 8000);
       },
     });
 
@@ -725,9 +668,7 @@ class PdfNotePlugin extends Plugin {
     });
 
     this.registerView(VIEW_TYPE, (leaf) => new GroupView(leaf, this));
-    this.registerView(CODE_VIEW, (leaf) => new CodeFileView(leaf, this));
     this.registerView(PROGRESS_VIEW, (leaf) => new ProgressView(leaf, this));
-    this.registerExtensions([...CODE_EXT], CODE_VIEW);
     this.addRibbonIcon("lucide-layers", "本组文件", () => this.activateGroupView());
     this.addRibbonIcon("lucide-flag", "学习进度", () => this.activateProgressView());
     this.addCommand({
@@ -829,7 +770,7 @@ class PdfNotePlugin extends Plugin {
       return;
     }
     const material = this.materialOf(active) || active;
-    const target = this.preferredMaterial(material);
+    const target = material;
     const viewer = this.pdfViewerOf(target);
     const page = viewer ? Math.round(Number(viewer.currentPageNumber)) : null;
 
@@ -855,7 +796,7 @@ class PdfNotePlugin extends Plugin {
       this.refreshGroupView();
       return;
     }
-    const target = this.preferredMaterial(file);
+    const target = file;
     const open = this.findLeafFor(target);
     if (open) {
       await this.focusLeaf(open);
@@ -960,15 +901,6 @@ class PdfNotePlugin extends Plugin {
     return Boolean(this.app.viewRegistry?.getTypeByExtension?.(file.extension.toLowerCase()));
   }
 
-  // 有同名 PDF 就优先用它，转换过的 docx/pptx 都能在 Obsidian 里看
-  preferredMaterial(file) {
-    if (this.hasView(file)) return file;
-    const pdfPath = file.path.replace(/\.[^.]+$/, ".pdf");
-    const sibling = this.app.vault.getAbstractFileByPath(pdfPath);
-    if (sibling instanceof TFile && this.hasView(sibling)) return sibling;
-    return file;
-  }
-
   // 同一个文件已经在某个标签里开着，就把那个标签提上来，不再开新的
   findLeafFor(file) {
     let found = null;
@@ -983,19 +915,26 @@ class PdfNotePlugin extends Plugin {
     this.app.workspace.setActiveLeaf(leaf, { focus: true });
   }
 
+  // 统一打开协议：导航仪自己不做任何预览。
+  // Obsidian 里注册了视图就交出去（原生 PDF/图片/音视频，以及 Office Reader、
+  // HTML Reader、Media Extended、Jupyter reader 等外部插件注册的扩展名）；
+  // 代码文件交给外部编辑器；其余交给系统默认应用。
   async openMaterial(file) {
-    const target = this.preferredMaterial(file);
-    const open = this.findLeafFor(target);
+    const open = this.findLeafFor(file);
     if (open) {
       await this.focusLeaf(open);
       return;
     }
-    if (this.hasView(target)) {
+    if (this.hasView(file)) {
       const leaf = this.app.workspace.getLeaf("tab");
-      await leaf.openFile(target);
+      await leaf.openFile(file);
       return;
     }
-    await this.app.openWithDefaultApp(target.path);
+    if (this.isCode(file)) {
+      this.openInEditor(file);
+      return;
+    }
+    await this.app.openWithDefaultApp(file.path);
   }
 
   // 作业记录旁边的同名文件夹就是这一组的交付物
@@ -1117,10 +1056,10 @@ class PdfNotePlugin extends Plugin {
     return null;
   }
 
-  // 面板里点一行时实际要打开的东西：视频条目打开视频本身，其余材料优先同名 PDF
+  // 面板里点一行时实际要打开的东西：视频条目打开视频本身，其余材料原样交给统一协议
   mediaTarget(file) {
     const media = file.extension.toLowerCase() === "md" && this.isMediaEntry(file) ? this.mediaFile(file) : null;
-    return this.preferredMaterial(media || file);
+    return media || file;
   }
 
   // 媒体条目的时长，秒 -> mm:ss
@@ -1565,16 +1504,8 @@ class PdfNotePlugin extends Plugin {
   addMenuItem(menu, pdf) {
     const { study, work } = this.collect(pdf);
 
-    // 转换出同名 PDF 的，直接开 PDF；实在渲染不了的，给一个系统应用的入口
-    const target = this.preferredMaterial(pdf);
-    if (target !== pdf) {
-      menu.addItem((item) =>
-        item
-          .setTitle("打开 PDF 版")
-          .setIcon("lucide-file-type-2")
-          .onClick(() => this.openMaterial(pdf))
-      );
-    } else if (!this.hasView(pdf)) {
+    // 统一协议之外的格式给一个系统应用入口，其余类型 Obsidian 里直接开
+    if (!this.hasView(pdf) && !this.isCode(pdf)) {
       menu.addItem((item) =>
         item
           .setTitle("用系统默认应用打开")

@@ -138,38 +138,3 @@
 .mn-row:hover .mn-clear {
   display: inline-flex;
 }
-
-.mn-code {
-  display: flex;
-  flex-direction: column;
-  padding: 0;
-  height: 100%;
-}
-
-.mn-code-bar {
-  display: flex;
-  gap: 8px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--background-modifier-border);
-}
-
-.mn-code-bar button {
-  font-size: 12px;
-  padding: 2px 10px;
-}
-
-.mn-code-area {
-  flex: 1;
-  width: 100%;
-  min-height: 0;
-  resize: none;
-  border: none;
-  outline: none;
-  padding: 12px 14px;
-  font-family: var(--font-monospace);
-  font-size: 13px;
-  line-height: 1.55;
-  tab-size: 4;
-  background: var(--background-primary);
-  color: var(--text-normal);
-}
