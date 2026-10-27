@@ -1080,43 +1080,6 @@ class PdfNotePlugin extends Plugin {
     return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
   }
 
-  // 哪些知识页把这一组材料列进了 sources
-  knowledgeFor(files) {
-    const paths = new Set(files.map((file) => file.path));
-    if (paths.size === 0) return [];
-    const out = [];
-
-    for (const note of this.app.vault.getMarkdownFiles()) {
-      const cache = this.app.metadataCache.getFileCache(note);
-      if (!cache || !NOTE_TYPES[cache.frontmatter?.type]) continue;
-      const links = cache.frontmatterLinks || [];
-      for (const link of links) {
-        if (link.key !== "sources" && !link.key.startsWith("sources.")) continue;
-        const dest = this.app.metadataCache.getFirstLinkpathDest(linkTarget(link.link), note.path);
-        if (dest && paths.has(dest.path)) {
-          out.push(note);
-          break;
-        }
-      }
-    }
-    return out;
-  }
-
-  knowledgeGroups() {
-    const groups = Object.keys(NOTE_TYPES).map((type) => ({ type, label: NOTE_TYPES[type], files: [] }));
-    const index = new Map(groups.map((group) => [group.type, group]));
-
-    for (const note of this.app.vault.getMarkdownFiles()) {
-      const type = this.app.metadataCache.getFileCache(note)?.frontmatter?.type;
-      const group = index.get(type);
-      if (group) group.files.push(note);
-    }
-    for (const group of groups) {
-      group.files.sort((a, b) => (b.stat?.mtime || 0) - (a.stat?.mtime || 0));
-    }
-    return groups;
-  }
-
   async saveSettings() {
     await this.saveData(this.settings);
   }
@@ -1467,7 +1430,6 @@ class PdfNotePlugin extends Plugin {
     const members = [lecture, lab, ...records].filter(Boolean);
     const videos = this.videosFor(members);
     const workFiles = this.workFiles(records);
-    const knowledge = this.knowledgeFor(members);
 
     // 按「文件所在目录名」自动分段：库里有什么目录就只出哪几段。
     // 微积分这种没有 课件/实验 的课不会再顶着一个空段。
@@ -1501,8 +1463,6 @@ class PdfNotePlugin extends Plugin {
     const sections = labels
       .map((label) => ({ label, files: buckets.get(label) }))
       .filter((section) => section.files.length > 0);
-
-    if (knowledge.length > 0) sections.push({ label: "知识页", files: knowledge });
 
     return { lecture: lecture || lab, lab, sections };
   }
@@ -2021,61 +1981,6 @@ class PdfNotePlugin extends Plugin {
     if (this.app.vault.getAbstractFileByPath(path) instanceof TFolder) return path;
     await this.app.vault.createFolder(path);
     return path;
-  }
-
-  promptNewKnowledge() {
-    new KnowledgeModal(this.app, (title, type) => this.createKnowledge(title, type)).open();
-  }
-
-  async createKnowledge(title, type) {
-    try {
-      const existing = this.findKnowledge(title);
-      if (existing) {
-        new Notice(`已经有这一页：${existing.basename}`);
-        await this.openFile(existing);
-        return;
-      }
-
-      const label = KNOWLEDGE_TYPES[type] || KNOWLEDGE_TYPES.concept;
-      const folder = await this.ensureFolder(normalizePath(`${KNOWLEDGE_ROOT}/${label}`));
-      const name = title.replace(/[\\/:*?"<>|#^[\]]/g, "-").replace(/\s+/g, " ").trim();
-      if (!name) return;
-
-      const path = normalizePath(`${folder}/${name}.md`);
-      let note = this.app.vault.getAbstractFileByPath(path);
-      if (!(note instanceof TFile)) {
-        const lines = [
-          `type: ${type in KNOWLEDGE_TYPES ? type : "concept"}`,
-          `title: ${yamlString(title)}`,
-          "aliases: []",
-          "tags: []",
-          "sources: []",
-          "related: []",
-          `created: ${today()}`,
-        ];
-        note = await this.app.vault.create(path, `---\n${lines.join("\n")}\n---\n`);
-      }
-      await this.openFile(note);
-    } catch (error) {
-      console.error("[course-navigator]", error);
-      new Notice(`无法创建知识页：${error.message}`);
-    }
-  }
-
-  // 文件名、title、aliases 任一命中就算同一页，跨类型也查
-  findKnowledge(title) {
-    const target = title.trim().toLowerCase();
-    if (!target) return null;
-
-    for (const note of this.app.vault.getMarkdownFiles()) {
-      const fm = this.app.metadataCache.getFileCache(note)?.frontmatter || {};
-      const aliases = Array.isArray(fm.aliases) ? fm.aliases : fm.aliases ? [fm.aliases] : [];
-      const names = [note.basename, fm.title, ...aliases]
-        .filter((value) => typeof value === "string")
-        .map((value) => value.trim().toLowerCase());
-      if (names.includes(target)) return note;
-    }
-    return null;
   }
 }
 

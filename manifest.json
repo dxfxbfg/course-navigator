@@ -1,7 +1,7 @@
 {
   "id": "course-navigator",
   "name": "Course Navigator",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "minAppVersion": "1.4.0",
   "description": "课程材料导航：本组面板、学习进度、作业记录与手写件归档。识别各类材料文件，预览交给原生与外部插件。",
   "author": "knightsama",
