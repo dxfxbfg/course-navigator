@@ -546,7 +546,9 @@ class PdfNotePlugin extends Plugin {
 
     // 菜单最先挂，后面任何一步出错都不至于整个菜单消失
     this.registerEvent(
-      this.app.workspace.on("file-menu", (menu, file) => {
+      this.app.workspace.on("file-menu", (menu, file, source, leaf) => {
+        // 预览视图右上角 ⋯（source = more-options）里，导航仪的操作独立成组
+        if (source === "more-options") menu.addSeparator();
         if (file instanceof TFolder) {
           this.addFolderMenu(menu, file);
           return;
@@ -770,7 +772,8 @@ class PdfNotePlugin extends Plugin {
       return;
     }
     const material = this.materialOf(active) || active;
-    const target = material;
+    // 媒体条目记视频/音频本身；其余记解析出的材料
+    const target = this.isMediaEntry(active) ? this.mediaFile(active) || active : material;
     const viewer = this.pdfViewerOf(target);
     const page = viewer ? Math.round(Number(viewer.currentPageNumber)) : null;
 
@@ -1018,6 +1021,9 @@ class PdfNotePlugin extends Plugin {
         item.setTitle("播放").setIcon("lucide-play").onClick(() => this.openMaterial(media))
       );
     }
+    menu.addItem((item) =>
+      item.setTitle("标记学习进度").setIcon("lucide-flag").onClick(() => this.markProgress(note))
+    );
     menu.addItem((item) =>
       item.setTitle("关联到材料…").setIcon("lucide-link").onClick(() => this.askMaterial(note))
     );
